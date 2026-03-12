@@ -1,41 +1,58 @@
 import { NextResponse } from 'next/server'
 import { createProduct } from '@/lib/gumroad'
-import { generatePDF, createProductZip } from '@/lib/file-generator'
+import { generateGuideMarkdown, createProductZip } from '@/lib/file-generator'
+
+export const runtime = 'nodejs'
 
 export async function POST(req: Request) {
+  let step = 'parsing request'
   try {
-    const {
+    const body = await req.json()
+    const { title, description, longDescription, stepByStepGuide, faq, emailSequence, salesCopy, price } = body
+
+    if (!process.env.GUMROAD_ACCESS_TOKEN) {
+      return NextResponse.json(
+        { error: 'GUMROAD_ACCESS_TOKEN is not set. Add it in Vercel → Settings → Environment Variables.' },
+        { status: 500 }
+      )
+    }
+
+    step = 'generating markdown guide'
+    const guideMarkdown = generateGuideMarkdown(
       title,
-      description,
-      longDescription,
       stepByStepGuide,
-      faq,
-      emailSequence,
-      price,
-    } = await req.json()
+      faq ?? [],
+      emailSequence ?? [],
+      salesCopy ?? ''
+    )
 
-    // 1. Generate PDF guide from stepByStepGuide + FAQ
-    const pdfContent = `# ${title}\n\n## Step-by-Step Guide\n${stepByStepGuide}\n\n## Frequently Asked Questions\n${faq.join('\n\n')}`
-    const pdfBuffer = await generatePDF(pdfContent)
+    step = 'creating ZIP bundle'
+    const templateLink = 'https://make.com/templates/your-template-id — replace this after building your workflow'
+    const zipBuffer = await createProductZip(guideMarkdown, templateLink, faq ?? [])
 
-    // 2. Create a template link placeholder
-    const templateLink = 'https://make.com/templates/your-template-id (replace after building)'
-
-    // 3. Create ZIP containing PDF and template link
-    const zipBuffer = await createProductZip(pdfBuffer, templateLink, faq)
-
-    // 4. Create product on Gumroad
+    step = 'creating Gumroad product'
     const product = await createProduct({
       name: title,
-      description: longDescription,
-      price: price * 100, // convert to cents
+      description: longDescription || description,
+      price: Math.round(price * 100),
       file: zipBuffer,
-      custom_permalink: title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+      custom_permalink: title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50),
     })
 
-    return NextResponse.json({ productUrl: product.short_url })
-  } catch (error) {
-    console.error('Publish error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ productUrl: product.short_url || product.url || 'https://gumroad.com/dashboard' })
+
+  } catch (error: any) {
+    console.error(`Publish failed at step [${step}]:`, error)
+
+    // Pull the most useful message out of axios errors too
+    const axiosMsg = error?.response?.data
+      ? JSON.stringify(error.response.data)
+      : null
+    const message = axiosMsg || error?.message || String(error)
+
+    return NextResponse.json(
+      { error: `Failed at [${step}]: ${message}` },
+      { status: 500 }
+    )
   }
 }
