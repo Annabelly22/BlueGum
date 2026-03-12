@@ -1,5 +1,4 @@
 import axios from 'axios'
-import FormData from 'form-data'
 
 const GUMROAD_API = 'https://api.gumroad.com/v2'
 
@@ -7,26 +6,45 @@ interface CreateProductParams {
   name: string
   description: string
   price: number // in cents
-  file?: Buffer
   custom_permalink?: string
 }
 
 export async function createProduct(params: CreateProductParams) {
-  const form = new FormData()
-  form.append('access_token', process.env.GUMROAD_ACCESS_TOKEN!)
-  form.append('name', params.name)
-  form.append('description', params.description)
-  form.append('price', params.price.toString())
-  if (params.file) {
-    form.append('file', params.file, { filename: 'product.zip', contentType: 'application/zip' })
-  }
-  if (params.custom_permalink) {
-    form.append('custom_permalink', params.custom_permalink)
+  const token = process.env.GUMROAD_ACCESS_TOKEN!
+
+  // Step 1: Create the product (JSON body, Bearer auth, no file)
+  const productRes = await axios.post(
+    `${GUMROAD_API}/products`,
+    {
+      name: params.name,
+      description: params.description,
+      price: params.price,
+      ...(params.custom_permalink ? { custom_permalink: params.custom_permalink } : {}),
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    }
+  )
+
+  if (!productRes.data.success) {
+    throw new Error(`Gumroad product creation failed: ${JSON.stringify(productRes.data)}`)
   }
 
-  const response = await axios.post(`${GUMROAD_API}/products`, form, {
-    headers: form.getHeaders(),
+  const product = productRes.data.product
+
+  // Step 2: Publish it so it's live
+  await axios.put(
+    `${GUMROAD_API}/products/${product.id}/enable`,
+    {},
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  ).catch(() => {
+    // non-fatal if enable fails — product still created
   })
 
-  return response.data.product
+  return product
 }
