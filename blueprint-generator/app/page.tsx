@@ -170,6 +170,8 @@ export default function Home() {
   const [logId, setLogId]         = useState(0)
   const [published, setPublished] = useState(false)
   const [pubUrl, setPubUrl]       = useState('')
+  const [zipBase64, setZipBase64] = useState('')
+  const [productId, setProductId] = useState('')
   const [activeTab, setActiveTab] = useState<'edit' | 'guide' | 'email'>('edit')
   const [breach, setBreach]       = useState(false)
   const [bootDone, setBootDone]   = useState(false)
@@ -275,8 +277,11 @@ export default function Home() {
 
       setPublished(true)
       setPubUrl(data.productUrl)
+      if (data.zipBase64) setZipBase64(data.zipBase64)
+      if (data.productId) setProductId(data.productId)
       addLog('DEPLOY SUCCESSFUL ✓', 'success')
       addLog(`Product URL: ${data.productUrl}`, 'success')
+      addLog('ACTION REQUIRED: Upload ZIP via Gumroad dashboard → Edit Product → Files', 'warn')
     } catch (err: any) {
       addLog(`ERROR: ${err.message}`, 'error')
       addLog('Check: GUMROAD_ACCESS_TOKEN in Vercel env vars', 'warn')
@@ -630,19 +635,49 @@ export default function Home() {
 
                 {published && (
                   <div style={{
-                    marginTop: '1rem', padding: '1rem 1.25rem',
+                    marginTop: '1rem', padding: '1.25rem',
                     border: '1px solid var(--green)',
                     background: 'rgba(0,255,65,0.04)',
-                    boxShadow: '0 0 20px rgba(0,255,65,0.12), inset 0 0 20px rgba(0,255,65,0.04)'
+                    boxShadow: '0 0 20px rgba(0,255,65,0.12), inset 0 0 20px rgba(0,255,65,0.04)',
+                    display: 'flex', flexDirection: 'column', gap: '0.75rem'
                   }}>
-                    <p className="font-title glow-green" style={{ fontSize: '0.65rem', letterSpacing: '0.15em', marginBottom: '0.5rem' }}>
-                      ✓ DEPLOYMENT SUCCESSFUL — PRODUCT LIVE
+                    <p className="font-title glow-green" style={{ fontSize: '0.65rem', letterSpacing: '0.15em' }}>
+                      ✓ GUMROAD PRODUCT CREATED
                     </p>
                     <a href={pubUrl} target="_blank" rel="noopener noreferrer"
                       className="font-mono" style={{ color: 'var(--cyan)', fontSize: '0.75rem',
                         textDecoration: 'underline', textShadow: '0 0 8px var(--cyan)' }}>
                       {pubUrl}
                     </a>
+                    <div style={{ borderTop: '1px solid rgba(0,255,65,0.15)', paddingTop: '0.75rem' }}>
+                      <p className="font-mono" style={{ color: 'var(--yellow)', fontSize: '0.65rem', marginBottom: '0.5rem', letterSpacing: '0.1em' }}>
+                        ⚠ ACTION REQUIRED — UPLOAD ZIP TO GUMROAD
+                      </p>
+                      <p className="font-mono" style={{ color: 'rgba(184,220,232,0.5)', fontSize: '0.62rem', lineHeight: 1.6, marginBottom: '0.75rem' }}>
+                        Gumroad API doesn't support file upload at creation time. Download the ZIP below and attach it manually:<br/>
+                        Gumroad Dashboard → Products → Edit → Content → Upload a file
+                      </p>
+                      {zipBase64 && (
+                        <button
+                          onClick={() => {
+                            const blob = new Blob(
+                              [Uint8Array.from(atob(zipBase64), c => c.charCodeAt(0))],
+                              { type: 'application/zip' }
+                            )
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = 'blueprint-product.zip'
+                            a.click()
+                            URL.revokeObjectURL(url)
+                          }}
+                          className="btn-cyber"
+                          style={{ width: 'auto', padding: '0.6rem 1.25rem', fontSize: '0.65rem', borderColor: 'var(--yellow)', color: 'var(--yellow)' }}
+                        >
+                          <span>⬇ DOWNLOAD PRODUCT ZIP</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
