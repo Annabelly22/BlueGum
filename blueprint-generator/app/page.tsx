@@ -16,6 +16,20 @@ interface GeneratedContent {
   demandData?: any
 }
 
+interface PublishStep {
+  label: string
+  status: 'ok' | 'warn' | 'skip'
+  detail?: string
+}
+
+interface PublishResult {
+  productUrl: string
+  zipUrl: string
+  productId: string
+  offerCode: string | null
+  steps: PublishStep[]
+}
+
 interface LogEntry {
   id: number
   text: string
@@ -42,7 +56,7 @@ function MatrixRain() {
     resize()
     window.addEventListener('resize', resize)
 
-    const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノ0123456789ABCDEF<>{}[]|\\/'
+    const chars = 'アイウエオカキクケコサシスセソタチツテトナニヌネノ0123456789ABCDEF<>{}[]|\\\/'
     const fontSize = 13
     let cols = Math.floor(canvas.width / fontSize)
     const drops: number[] = Array(cols).fill(1).map(() => Math.random() * -100)
@@ -97,7 +111,7 @@ function MatrixRain() {
 }
 
 /* ══════════════════════════════════
-   HEX STREAM (live updating)
+   HEX STREAM
 ══════════════════════════════════ */
 const HEX = '0123456789ABCDEF'
 function rndHex(n: number) {
@@ -114,26 +128,6 @@ function HexStream({ len = 32 }: { len?: number }) {
 }
 
 /* ══════════════════════════════════
-   TYPING TEXT
-══════════════════════════════════ */
-function TypeIn({ text, speed = 25, className = '' }: { text: string; speed?: number; className?: string }) {
-  const [displayed, setDisplayed] = useState('')
-  useEffect(() => {
-    setDisplayed('')
-    let i = 0
-    const id = setInterval(() => {
-      if (i < text.length) {
-        setDisplayed(text.slice(0, ++i))
-      } else {
-        clearInterval(id)
-      }
-    }, speed)
-    return () => clearInterval(id)
-  }, [text, speed])
-  return <span className={className}>{displayed}<span style={{ animation: 'blink-cursor 1s infinite', opacity: displayed.length < text.length ? 1 : 0 }}>▌</span></span>
-}
-
-/* ══════════════════════════════════
    BREACH BAR
 ══════════════════════════════════ */
 function BreachBar({ show }: { show: boolean }) {
@@ -145,36 +139,43 @@ function BreachBar({ show }: { show: boolean }) {
    BOOT MESSAGES
 ══════════════════════════════════ */
 const BOOT: Array<{ text: string; type: LogEntry['type'] }> = [
-  { text: 'BLUEGUM_STUDIO.EXE v2.7.1 — cold boot sequence initiated', type: 'system' },
+  { text: 'BLUEGUM_STUDIO.EXE v3.0.0 — cold boot sequence initiated', type: 'system' },
   { text: 'Loading neural synthesis engine............... [OK]', type: 'system' },
   { text: 'Mounting Anthropic API bridge.................. [OK]', type: 'system' },
   { text: 'Initializing Gumroad commerce module........... [READY]', type: 'system' },
+  { text: 'Connecting Supabase storage layer.............. [READY]', type: 'system' },
   { text: 'SerpAPI market scanner......................... [OPTIONAL]', type: 'system' },
-  { text: 'PDF render pipeline............................ [LOADED]', type: 'system' },
   { text: 'ZIP packaging module........................... [LOADED]', type: 'system' },
+  { text: 'Offer code generator........................... [ARMED]', type: 'system' },
   { text: 'Circuit integrity check........................ [PASSED]', type: 'success' },
   { text: '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', type: 'data' },
   { text: 'All systems nominal. Operator clearance granted.', type: 'success' },
 ]
 
 /* ══════════════════════════════════
+   STEP STATUS ICON
+══════════════════════════════════ */
+function StepIcon({ status }: { status: 'ok' | 'warn' | 'skip' }) {
+  if (status === 'ok')   return <span style={{ color: 'var(--green)', textShadow: '0 0 8px var(--green)' }}>✓</span>
+  if (status === 'warn') return <span style={{ color: 'var(--yellow)', textShadow: '0 0 8px var(--yellow)' }}>⚠</span>
+  return <span style={{ color: 'rgba(0,255,249,0.3)' }}>—</span>
+}
+
+/* ══════════════════════════════════
    MAIN COMPONENT
 ══════════════════════════════════ */
 export default function Home() {
-  const [idea, setIdea]           = useState('')
-  const [useSerp, setUseSerp]     = useState(false)
-  const [generated, setGenerated] = useState<GeneratedContent | null>(null)
-  const [loading, setLoading]     = useState(false)
-  const [price, setPrice]         = useState(39)
-  const [logs, setLogs]           = useState<LogEntry[]>([])
-  const [logId, setLogId]         = useState(0)
-  const [published, setPublished] = useState(false)
-  const [pubUrl, setPubUrl]       = useState('')
-  const [zipBase64, setZipBase64] = useState('')
-  const [productId, setProductId] = useState('')
-  const [activeTab, setActiveTab] = useState<'edit' | 'guide' | 'email'>('edit')
-  const [breach, setBreach]       = useState(false)
-  const [bootDone, setBootDone]   = useState(false)
+  const [idea, setIdea]               = useState('')
+  const [useSerp, setUseSerp]         = useState(false)
+  const [generated, setGenerated]     = useState<GeneratedContent | null>(null)
+  const [loading, setLoading]         = useState(false)
+  const [price, setPrice]             = useState(39)
+  const [logs, setLogs]               = useState<LogEntry[]>([])
+  const [published, setPublished]     = useState(false)
+  const [pubResult, setPubResult]     = useState<PublishResult | null>(null)
+  const [activeTab, setActiveTab]     = useState<'edit' | 'guide' | 'email'>('edit')
+  const [breach, setBreach]           = useState(false)
+  const [bootDone, setBootDone]       = useState(false)
   const [showContent, setShowContent] = useState(false)
   const logRef = useRef<HTMLDivElement>(null)
   const idRef  = useRef(0)
@@ -186,15 +187,14 @@ export default function Home() {
 
   const addLog = useCallback((text: string, type: LogEntry['type'] = 'info') => {
     const entry: LogEntry = { id: idRef.current++, text, type, ts: now() }
-    setLogs(prev => [...prev.slice(-60), entry])
+    setLogs(prev => [...prev.slice(-80), entry])
   }, [])
 
-  // scroll log to bottom
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
   }, [logs])
 
-  // boot sequence
+  // Boot sequence
   useEffect(() => {
     let i = 0
     const tick = () => {
@@ -216,9 +216,11 @@ export default function Home() {
     setLoading(true)
     setBreach(true)
     setTimeout(() => setBreach(false), 900)
+    setPublished(false)
+    setPubResult(null)
 
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'data')
-    addLog(`SYNTHESIS INITIATED — parsing concept string...`, 'info')
+    addLog('SYNTHESIS INITIATED — parsing concept string...', 'info')
     addLog(`INPUT: "${idea.slice(0, 60)}${idea.length > 60 ? '...' : ''}"`, 'data')
     addLog('Routing request to Claude neural core...', 'info')
     addLog('Awaiting response from API cluster...', 'warn')
@@ -231,22 +233,18 @@ export default function Home() {
       })
       const data = await res.json()
 
-      if (!res.ok || data.error) {
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
 
       setGenerated(data)
       setShowContent(true)
       addLog('Neural synthesis complete.', 'success')
-      addLog(`Product title encoded: "${data.title}"`, 'success')
-      addLog(`FAQ nodes generated: ${data.faq?.length ?? 0}`, 'data')
-      addLog(`Email sequence nodes: ${data.emailSequence?.length ?? 0}`, 'data')
-      addLog('Output matrix ready for review.', 'success')
+      addLog(`Product title: "${data.title}"`, 'success')
+      addLog(`FAQ nodes: ${data.faq?.length ?? 0}  |  Email nodes: ${data.emailSequence?.length ?? 0}`, 'data')
+      addLog('Output matrix ready — review and edit before deploying.', 'success')
       setActiveTab('edit')
     } catch (err: any) {
       addLog(`ERROR: ${err.message}`, 'error')
       addLog('Check: ANTHROPIC_API_KEY in Vercel env vars', 'warn')
-      addLog('Check: Vercel Function Logs for full stack trace', 'warn')
     } finally {
       setLoading(false)
     }
@@ -260,10 +258,14 @@ export default function Home() {
     setTimeout(() => setBreach(false), 900)
 
     addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'data')
-    addLog('DEPLOY SEQUENCE INITIATED', 'info')
-    addLog('Rendering PDF artifact...', 'info')
-    addLog('Compressing ZIP payload...', 'info')
-    addLog('Handshaking with Gumroad API...', 'warn')
+    addLog('FULL DEPLOY SEQUENCE INITIATED', 'info')
+    addLog('[1/7] Generating blueprint guide...', 'info')
+    addLog('[2/7] Assembling ZIP package...', 'info')
+    addLog('[3/7] Uploading to Supabase Storage...', 'warn')
+    addLog('[4/7] Creating Gumroad product...', 'warn')
+    addLog('[5/7] Publishing product live...', 'warn')
+    addLog('[6/7] Generating launch offer code...', 'warn')
+    addLog('[7/7] Finalizing deploy...', 'warn')
 
     try {
       const res = await fetch('/api/publish', {
@@ -276,15 +278,26 @@ export default function Home() {
       if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`)
 
       setPublished(true)
-      setPubUrl(data.productUrl)
-      if (data.zipBase64) setZipBase64(data.zipBase64)
-      if (data.productId) setProductId(data.productId)
-      addLog('DEPLOY SUCCESSFUL ✓', 'success')
-      addLog(`Product URL: ${data.productUrl}`, 'success')
-      addLog('ACTION REQUIRED: Upload ZIP via Gumroad dashboard → Edit Product → Files', 'warn')
+      setPubResult(data)
+
+      addLog('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━', 'data')
+      addLog('DEPLOY COMPLETE ✓', 'success')
+
+      if (data.steps) {
+        for (const s of data.steps) {
+          const type = s.status === 'ok' ? 'success' : s.status === 'warn' ? 'warn' : 'info'
+          addLog(`  ${s.status === 'ok' ? '✓' : '⚠'} ${s.label}`, type)
+        }
+      }
+
+      addLog(`Gumroad: ${data.productUrl}`, 'success')
+      if (data.zipUrl) addLog(`Supabase: ${data.zipUrl}`, 'success')
+      if (data.offerCode) addLog(`Offer code: ${data.offerCode} (20% off, 50 uses)`, 'success')
+      addLog('Next: Build your Make.com workflow → update template link in product.', 'warn')
+
     } catch (err: any) {
       addLog(`ERROR: ${err.message}`, 'error')
-      addLog('Check: GUMROAD_ACCESS_TOKEN in Vercel env vars', 'warn')
+      addLog('Check Vercel Function Logs for full stack trace.', 'warn')
     } finally {
       setLoading(false)
     }
@@ -304,13 +317,14 @@ export default function Home() {
 
   /* ── STATUS ── */
   const statuses = [
-    { label: 'CLAUDE_API',  val: bootDone ? 'READY' : 'INIT',     col: bootDone ? 'var(--green)' : 'var(--yellow)' },
-    { label: 'GUMROAD',     val: 'READY',                           col: 'var(--cyan)' },
-    { label: 'SERPAPI',     val: useSerp ? 'ARMED' : 'STANDBY',    col: useSerp ? 'var(--yellow)' : 'rgba(0,255,249,0.3)' },
-    { label: 'PDF_RENDER',  val: 'LOADED',                          col: 'var(--cyan)' },
+    { label: 'CLAUDE_API',  val: bootDone ? 'READY' : 'INIT',       col: bootDone ? 'var(--green)' : 'var(--yellow)' },
+    { label: 'GUMROAD',     val: published ? 'DEPLOYED' : 'READY',   col: published ? 'var(--green)' : 'var(--cyan)' },
+    { label: 'SUPABASE',    val: published && pubResult?.zipUrl ? 'STORED' : 'READY', col: published && pubResult?.zipUrl ? 'var(--green)' : 'var(--cyan)' },
+    { label: 'SERPAPI',     val: useSerp ? 'ARMED' : 'STANDBY',      col: useSerp ? 'var(--yellow)' : 'rgba(0,255,249,0.3)' },
     { label: 'SYNTHESIS',   val: generated ? 'COMPLETE' : loading ? 'ACTIVE' : 'IDLE',
       col: generated ? 'var(--green)' : loading ? 'var(--yellow)' : 'rgba(0,255,249,0.3)' },
-    { label: 'GUMROAD_TX',  val: published ? 'DEPLOYED' : 'IDLE',  col: published ? 'var(--green)' : 'rgba(0,255,249,0.3)' },
+    { label: 'OFFER_CODE',  val: pubResult?.offerCode ? pubResult.offerCode : published ? 'NONE' : 'IDLE',
+      col: pubResult?.offerCode ? 'var(--yellow)' : 'rgba(0,255,249,0.3)' },
   ]
 
   /* ══════════════════════════════════
@@ -339,7 +353,6 @@ export default function Home() {
 
         {/* ── HEADER ── */}
         <header style={{ marginBottom: '2.5rem' }}>
-          {/* system bar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem',
             borderBottom: '1px solid rgba(0,255,249,0.08)', paddingBottom: '0.75rem' }}>
             <span className="dot-green" />
@@ -353,7 +366,6 @@ export default function Home() {
             <HexStream len={16} />
           </div>
 
-          {/* title */}
           <div style={{ marginBottom: '0.5rem' }}>
             <h1 className="font-title flicker" style={{
               fontSize: 'clamp(2.2rem, 7vw, 4.2rem)', fontWeight: 900,
@@ -372,7 +384,6 @@ export default function Home() {
             Make.com Automation Blueprint Factory // Powered by Claude AI
           </p>
 
-          {/* hex stream row */}
           <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', overflow: 'hidden' }}>
             <HexStream len={24} />
             <span className="hex-deco" style={{ color: 'rgba(255,0,160,0.25)' }}>█░█░█░█</span>
@@ -391,7 +402,6 @@ export default function Home() {
               <div className="sweep-light" />
               <div className="scan-line" />
 
-              {/* panel header */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                   <span className="dot-cyan" />
@@ -402,7 +412,6 @@ export default function Home() {
                 <span className="cyber-tag" style={{ fontSize: '0.62rem', opacity: 0.6 }}>MODULE_01</span>
               </div>
 
-              {/* textarea */}
               <div style={{ marginBottom: '1.25rem' }}>
                 <p className="cyber-label">Describe your automation workflow</p>
                 <textarea
@@ -477,7 +486,6 @@ export default function Home() {
                 <div className="sweep-light" />
                 <div className="scan-line" style={{ animationDelay: '2s' }} />
 
-                {/* panel header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                     <span className="dot-green" />
@@ -580,13 +588,12 @@ export default function Home() {
                         background: 'rgba(0,255,249,0.02)'
                       }}>
                         <summary style={{
-                          padding: '0.7rem 0.9rem', display: 'flex', gap: '0.75rem', alignItems: 'center'
+                          padding: '0.7rem 0.9rem', display: 'flex', gap: '0.75rem', alignItems: 'center', cursor: 'crosshair'
                         }}>
                           <span className="font-mono" style={{ color: 'var(--yellow)', fontSize: '0.65rem' }}>NODE_{String(i + 1).padStart(2, '0')}</span>
                           <span style={{ flex: 1, borderLeft: '1px solid rgba(0,255,249,0.1)', paddingLeft: '0.6rem' }}>
                             <span className="font-mono" style={{ color: 'rgba(0,255,249,0.65)', fontSize: '0.72rem' }}>{email.subject}</span>
                           </span>
-                          <span className="font-mono" style={{ color: 'rgba(0,255,249,0.25)', fontSize: '0.6rem' }}>▶</span>
                         </summary>
                         <div style={{ padding: '0.9rem', borderTop: '1px solid rgba(0,255,249,0.08)' }}>
                           <pre className="font-mono" style={{
@@ -624,59 +631,137 @@ export default function Home() {
                     style={{ width: 'auto', padding: '0.85rem 2rem' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                       {loading
-                        ? <><div className="spinner spinner-green" /><span>TRANSMITTING...</span></>
+                        ? <><div className="spinner spinner-green" /><span>DEPLOYING ALL SYSTEMS...</span></>
                         : published
-                          ? <><span style={{ color: 'var(--green)', textShadow: '0 0 8px var(--green)' }}>✓</span><span>DEPLOYED</span></>
+                          ? <><span style={{ color: 'var(--green)', textShadow: '0 0 8px var(--green)' }}>✓</span><span>FULLY DEPLOYED</span></>
                           : <><span>⬆</span><span>DEPLOY TO GUMROAD</span></>
                       }
                     </div>
                   </button>
                 </div>
 
-                {published && (
+                {loading && (
+                  <div className="progress-bar" style={{ marginTop: '0.75rem' }}>
+                    <div className="progress-bar-fill" style={{ '--target': '85%' } as any} />
+                  </div>
+                )}
+
+                {/* ─── PUBLISH RESULT PANEL ─── */}
+                {published && pubResult && (
                   <div style={{
-                    marginTop: '1rem', padding: '1.25rem',
+                    marginTop: '1.25rem',
                     border: '1px solid var(--green)',
-                    background: 'rgba(0,255,65,0.04)',
-                    boxShadow: '0 0 20px rgba(0,255,65,0.12), inset 0 0 20px rgba(0,255,65,0.04)',
-                    display: 'flex', flexDirection: 'column', gap: '0.75rem'
+                    background: 'rgba(0,255,65,0.03)',
+                    boxShadow: '0 0 24px rgba(0,255,65,0.1), inset 0 0 24px rgba(0,255,65,0.03)',
                   }}>
-                    <p className="font-title glow-green" style={{ fontSize: '0.65rem', letterSpacing: '0.15em' }}>
-                      ✓ GUMROAD PRODUCT CREATED
-                    </p>
-                    <a href={pubUrl} target="_blank" rel="noopener noreferrer"
-                      className="font-mono" style={{ color: 'var(--cyan)', fontSize: '0.75rem',
-                        textDecoration: 'underline', textShadow: '0 0 8px var(--cyan)' }}>
-                      {pubUrl}
-                    </a>
-                    <div style={{ borderTop: '1px solid rgba(0,255,65,0.15)', paddingTop: '0.75rem' }}>
-                      <p className="font-mono" style={{ color: 'var(--yellow)', fontSize: '0.65rem', marginBottom: '0.5rem', letterSpacing: '0.1em' }}>
-                        ⚠ ACTION REQUIRED — UPLOAD ZIP TO GUMROAD
-                      </p>
-                      <p className="font-mono" style={{ color: 'rgba(184,220,232,0.5)', fontSize: '0.62rem', lineHeight: 1.6, marginBottom: '0.75rem' }}>
-                        Gumroad API doesn't support file upload at creation time. Download the ZIP below and attach it manually:<br/>
-                        Gumroad Dashboard → Products → Edit → Content → Upload a file
-                      </p>
-                      {zipBase64 && (
-                        <button
-                          onClick={() => {
-                            const blob = new Blob(
-                              [Uint8Array.from(atob(zipBase64), c => c.charCodeAt(0))],
-                              { type: 'application/zip' }
-                            )
-                            const url = URL.createObjectURL(blob)
-                            const a = document.createElement('a')
-                            a.href = url
-                            a.download = 'blueprint-product.zip'
-                            a.click()
-                            URL.revokeObjectURL(url)
-                          }}
-                          className="btn-cyber"
-                          style={{ width: 'auto', padding: '0.6rem 1.25rem', fontSize: '0.65rem', borderColor: 'var(--yellow)', color: 'var(--yellow)' }}
-                        >
-                          <span>⬇ DOWNLOAD PRODUCT ZIP</span>
-                        </button>
+                    {/* header */}
+                    <div style={{
+                      padding: '0.75rem 1.25rem',
+                      borderBottom: '1px solid rgba(0,255,65,0.15)',
+                      display: 'flex', alignItems: 'center', gap: '0.6rem',
+                      background: 'rgba(0,255,65,0.06)'
+                    }}>
+                      <span className="dot-green" />
+                      <span className="font-title glow-green" style={{ fontSize: '0.65rem', letterSpacing: '0.2em' }}>
+                        DEPLOY COMPLETE — ALL SYSTEMS NOMINAL
+                      </span>
+                    </div>
+
+                    <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+                      {/* Automated steps summary */}
+                      {pubResult.steps?.length > 0 && (
+                        <div>
+                          <p className="cyber-label" style={{ fontSize: '0.58rem', marginBottom: '0.5rem' }}>AUTOMATED ACTIONS</p>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                            {pubResult.steps.map((s, i) => (
+                              <div key={i} style={{ display: 'flex', gap: '0.6rem', alignItems: 'flex-start', padding: '0.2rem 0' }}>
+                                <span className="font-mono" style={{ fontSize: '0.68rem', flexShrink: 0, minWidth: 16 }}>
+                                  <StepIcon status={s.status} />
+                                </span>
+                                <span className="font-mono" style={{
+                                  fontSize: '0.68rem', lineHeight: 1.4,
+                                  color: s.status === 'ok' ? 'rgba(0,255,65,0.8)' : s.status === 'warn' ? 'rgba(255,230,0,0.7)' : 'rgba(0,255,249,0.4)'
+                                }}>
+                                  {s.label}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
+
+                      <div style={{ height: 1, background: 'rgba(0,255,65,0.12)' }} />
+
+                      {/* Gumroad URL */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span className="font-mono" style={{ color: 'rgba(0,255,249,0.4)', fontSize: '0.58rem', letterSpacing: '0.15em' }}>GUMROAD_PRODUCT</span>
+                          <span className="font-mono" style={{ color: 'var(--green)', fontSize: '0.58rem' }}>● LIVE</span>
+                        </div>
+                        <a href={pubResult.productUrl} target="_blank" rel="noopener noreferrer"
+                          className="font-mono"
+                          style={{ color: 'var(--cyan)', fontSize: '0.78rem', textDecoration: 'underline',
+                            textShadow: '0 0 10px var(--cyan)', wordBreak: 'break-all' }}>
+                          {pubResult.productUrl}
+                        </a>
+                      </div>
+
+                      {/* Supabase ZIP URL */}
+                      {pubResult.zipUrl && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                          <span className="font-mono" style={{ color: 'rgba(0,255,249,0.4)', fontSize: '0.58rem', letterSpacing: '0.15em' }}>SUPABASE_FILE</span>
+                          <a href={pubResult.zipUrl} target="_blank" rel="noopener noreferrer"
+                            className="font-mono"
+                            style={{ color: 'var(--green)', fontSize: '0.7rem', textDecoration: 'underline', wordBreak: 'break-all' }}>
+                            {pubResult.zipUrl}
+                          </a>
+                          <span className="font-mono" style={{ color: 'rgba(0,255,65,0.4)', fontSize: '0.6rem' }}>
+                            ↳ embedded in product description automatically
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Offer code */}
+                      {pubResult.offerCode && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                          <span className="font-mono" style={{ color: 'rgba(0,255,249,0.4)', fontSize: '0.58rem', letterSpacing: '0.15em' }}>LAUNCH_CODE</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <span className="font-title" style={{
+                              color: 'var(--yellow)', fontSize: '1rem', letterSpacing: '0.15em',
+                              textShadow: '0 0 12px var(--yellow)', padding: '0.3rem 0.75rem',
+                              border: '1px solid rgba(255,230,0,0.3)', background: 'rgba(255,230,0,0.05)'
+                            }}>
+                              {pubResult.offerCode}
+                            </span>
+                            <span className="font-mono" style={{ color: 'rgba(255,230,0,0.5)', fontSize: '0.65rem' }}>
+                              20% off · 50 uses
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{ height: 1, background: 'rgba(0,255,65,0.12)' }} />
+
+                      {/* Manual next steps */}
+                      <div>
+                        <p className="cyber-label" style={{ fontSize: '0.58rem', marginBottom: '0.5rem' }}>REMAINING_MANUAL_STEPS</p>
+                        {[
+                          'Build your Make.com workflow using the guide in the ZIP',
+                          'Copy your Make.com template share URL',
+                          'Go to Gumroad → Edit product → update the template link in the description',
+                          'Test a purchase to confirm buyers receive the download link',
+                        ].map((step, i) => (
+                          <div key={i} style={{ display: 'flex', gap: '0.6rem', padding: '0.25rem 0' }}>
+                            <span className="font-mono" style={{ color: 'var(--pink)', fontSize: '0.65rem', flexShrink: 0 }}>
+                              {String(i + 1).padStart(2, '0')}.
+                            </span>
+                            <span className="font-mono" style={{ color: 'rgba(184,220,232,0.45)', fontSize: '0.65rem', lineHeight: 1.5 }}>
+                              {step}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -710,9 +795,7 @@ export default function Home() {
                 {loading && (
                   <div className="log-entry">
                     <span className="log-timestamp font-mono">{now()}</span>
-                    <span className="font-mono" style={{ color: 'var(--yellow)', fontSize: '0.68rem' }}>
-                      ▌
-                    </span>
+                    <span className="font-mono" style={{ color: 'var(--yellow)', fontSize: '0.68rem' }}>▌</span>
                   </div>
                 )}
               </div>
@@ -762,27 +845,42 @@ export default function Home() {
               <div style={{ position: 'absolute', top: -1, left: 0, right: 0, height: 1,
                 background: 'linear-gradient(90deg,transparent,rgba(255,0,160,0.3),transparent)' }} />
               <p className="cyber-label" style={{ marginBottom: '0.9rem', fontSize: '0.6rem' }}>OPERATOR_PROTOCOL</p>
-              <ol style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                {[
-                  'Define automation concept above',
-                  'Toggle SerpAPI for market intel',
-                  'Execute synthesis sequence',
-                  'Review & edit all output fields',
-                  'Set your price node (default $39)',
-                  'Deploy product to Gumroad grid',
-                  'Build the real Make.com workflow',
-                  'Update product with live template',
-                ].map((step, i) => (
-                  <li key={i} style={{ display: 'flex', gap: '0.5rem' }}>
-                    <span className="font-mono" style={{ color: 'var(--pink)', fontSize: '0.63rem', minWidth: 22, flexShrink: 0 }}>
-                      {String(i + 1).padStart(2, '0')}.
-                    </span>
-                    <span className="font-mono" style={{ color: 'rgba(184,220,232,0.38)', fontSize: '0.63rem', lineHeight: 1.5 }}>
-                      {step}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+
+              <p className="font-mono" style={{ color: 'rgba(0,255,65,0.5)', fontSize: '0.58rem', marginBottom: '0.6rem', letterSpacing: '0.1em' }}>
+                — AUTO ON DEPLOY —
+              </p>
+              {[
+                'Guide & ZIP generated',
+                'ZIP uploaded to Supabase',
+                'Gumroad product created',
+                'Product published live',
+                'Launch discount code armed',
+              ].map((s, i) => (
+                <div key={i} style={{ display: 'flex', gap: '0.5rem', padding: '0.2rem 0' }}>
+                  <span className="font-mono" style={{ color: 'var(--green)', fontSize: '0.62rem' }}>✓</span>
+                  <span className="font-mono" style={{ color: 'rgba(0,255,65,0.5)', fontSize: '0.62rem', lineHeight: 1.4 }}>{s}</span>
+                </div>
+              ))}
+
+              <div style={{ height: 1, background: 'rgba(255,0,160,0.1)', margin: '0.75rem 0' }} />
+
+              <p className="font-mono" style={{ color: 'rgba(255,0,160,0.5)', fontSize: '0.58rem', marginBottom: '0.6rem', letterSpacing: '0.1em' }}>
+                — YOU DO THESE —
+              </p>
+              {[
+                'Paste your automation idea',
+                'Review & edit generated content',
+                'Set price → click Deploy',
+                'Build the Make.com workflow',
+                'Paste template URL in product',
+              ].map((s, i) => (
+                <div key={i} style={{ display: 'flex', gap: '0.5rem', padding: '0.2rem 0' }}>
+                  <span className="font-mono" style={{ color: 'var(--pink)', fontSize: '0.62rem' }}>
+                    {String(i + 1).padStart(2, '0')}.
+                  </span>
+                  <span className="font-mono" style={{ color: 'rgba(184,220,232,0.35)', fontSize: '0.62rem', lineHeight: 1.4 }}>{s}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
