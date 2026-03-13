@@ -1,187 +1,66 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { generateGuideMarkdown, createProductZip } from '@/lib/file-generator'
 import { uploadZipToSupabase } from '@/lib/supabase'
-import {
-  updateProduct,
-  enableProduct,
-  listOfferCodes,
-  deleteOfferCode,
-  createOfferCode,
-  BLUEGUM_PRODUCT_ID,
-} from '@/lib/gumroad'
 
 export const runtime = 'nodejs'
 
-// Publish to Lemon Squeezy (optional — only runs if env vars set)
-async function publishToLemonSqueezy(opts: {
-  title: string
-  description: string
-  price: number
-  zipUrl: string
-}): Promise<{ url: string; productId: string } | null> {
-  const apiKey = process.env.LEMONSQUEEZY_API_KEY
-  const storeId = process.env.LEMONSQUEEZY_STORE_ID
-  if (!apiKey || !storeId) return null
+function slugify(str: string): string {
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50)
+}
 
-  try {
-    const res = await fetch('https://api.lemonsqueezy.com/v1/products', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/vnd.api+json',
-        'Content-Type': 'application/vnd.api+json',
-      },
-      body: JSON.stringify({
-        data: {
-          type: 'products',
-          attributes: {
-            name: opts.title,
-            description: `${opts.description}\n\nDownload: ${opts.zipUrl}`,
-            price: opts.price, // in cents
-            buy_now_url: null,
-            from_price: null,
-            to_price: null,
-          },
-          relationships: {
-            store: { data: { type: 'stores', id: storeId } },
-          },
-        },
-      }),
-    })
-
-    const json = await res.json()
-    if (json.errors) throw new Error(json.errors[0]?.detail || 'Lemon Squeezy error')
-
-    const productId = json.data?.id
-    const url = json.data?.attributes?.buy_now_url || `https://app.lemonsqueezy.com/products/${productId}`
-    return { url, productId }
-  } catch (e) {
-    console.error('Lemon Squeezy publish failed:', e)
-    return null
-  }
+function getModeLabel(mode: string): string {
+  if (mode === 'book') return 'book'
+  if (mode === 'template') return 'template'
+  return 'automation'
 }
 
 export async function POST(req: NextRequest) {
-  const steps: string[] = []
-
   try {
-    // Frontend sends the full generated content object + price
     const body = await req.json()
     const {
-      title,
-      description,
-      longDescription,
-      stepByStepGuide,
-      faq,
-      emailSequence,
-      salesCopy,
-      price = 700,
+      title, description, longDescription,
+      stepByStepGuide, setupGuide, fullContent, customizationGuide,
+      faq, emailSequence, salesCopy,
+      mode = 'automation',
+      price = 27,
     } = body
 
-    if (!title) {
-      return NextResponse.json({ error: 'title is required — make sure you generate content first' }, { status: 400 })
-    }
+    if (!title) return NextResponse.json({ error: 'title is required' }, { status: 400 })
 
-    // Step 1 — Build ZIP from already-generated content
-    steps.push('Building ZIP package...')
+    // Build guide content depending on mode
+    const guideContent = stepByStepGuide || setupGuide || fullContent || customizationGuide || ''
+    const modeLabel = getModeLabel(mode)
+
+    // Generate markdown
     const guideMarkdown = generateGuideMarkdown(
-      title,
-      stepByStepGuide,
-      faq,
-      emailSequence,
-      salesCopy
+      title, guideContent, faq ?? [], emailSequence ?? [], salesCopy ?? ''
     )
+
+    // Build ZIP
     const zipBuffer = await createProductZip(
       guideMarkdown,
-      'https://make.com/templates (update after building your workflow)',
-      faq
+      mode === 'automation' ? 'https://make.com/templates — paste your template URL here after building' : 'N/A',
+      faq ?? []
     )
-    steps.push(`✅ ZIP built (${Math.round(zipBuffer.byteLength / 1024)}kb)`)
 
-    // Step 2 — Upload to Supabase
-    steps.push('Uploading ZIP to Supabase storage...')
-    const filename = `${Date.now()}-${title.toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 40)}.zip`
+    // Upload to Supabase with descriptive filename:
+    // format: {mode}-{slug}-{timestamp}.zip
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const slug = slugify(title)
+    const filename = `${modeLabel}/${modeLabel}-${slug}-${timestamp}.zip`
+
     const zipUrl = await uploadZipToSupabase(zipBuffer, filename)
-    steps.push(`✅ Uploaded: ${zipUrl}`)
-
-    // Step 3 — Update Gumroad product
-    steps.push(`Updating Gumroad product (${BLUEGUM_PRODUCT_ID})...`)
-    const gumroadDescription = `
-<h2>${title}</h2>
-<p>${description}</p>
-${longDescription}
-<h3>📦 Download includes:</h3>
-<ul>
-  <li>📘 Complete step-by-step build guide</li>
-  <li>📧 3-part email sequence</li>
-  <li>❓ FAQ (${faq?.length ?? 0} questions)</li>
-  <li>💬 Sales copy</li>
-  <li>🔗 Make.com template link</li>
-</ul>
-<p><strong>Download ZIP:</strong> <a href="${zipUrl}">${zipUrl}</a></p>
-<p><em>Generated by BlueGum Studio</em></p>
-`.trim()
-
-    const priceInCents = Math.round(Number(price) * 100)
-
-    const product = await updateProduct(BLUEGUM_PRODUCT_ID, {
-      name: title,
-      description: gumroadDescription,
-      price: priceInCents,
-      published: true,
-    })
-    steps.push(`✅ Gumroad updated: ${product.short_url}`)
-
-    // Step 4 — Ensure published
-    await enableProduct(BLUEGUM_PRODUCT_ID)
-    steps.push('✅ Gumroad product is live')
-
-    // Step 5 — Refresh LAUNCH20 offer code
-    steps.push('Refreshing LAUNCH20 offer code...')
-    const existingCodes = await listOfferCodes(BLUEGUM_PRODUCT_ID)
-    const oldLaunch = existingCodes.find((c) => c.name === 'LAUNCH20')
-    if (oldLaunch) await deleteOfferCode(BLUEGUM_PRODUCT_ID, oldLaunch.id)
-    const offerCode = await createOfferCode(BLUEGUM_PRODUCT_ID, {
-      name: 'LAUNCH20',
-      amount_off: 20,
-      percent_off: true,
-      max_purchase_count: 50,
-    })
-    steps.push(`✅ Offer code: ${offerCode.name} (${offerCode.amount_off}% off, 50 uses)`)
-
-    // Step 6 — Lemon Squeezy (optional, non-blocking)
-    let lemonUrl: string | null = null
-    steps.push('Publishing to Lemon Squeezy...')
-    const lemon = await publishToLemonSqueezy({
-      title,
-      description,
-      price: priceInCents,
-      zipUrl,
-    })
-    if (lemon) {
-      lemonUrl = lemon.url
-      steps.push(`✅ Lemon Squeezy: ${lemon.url}`)
-    } else {
-      steps.push('⚠ Lemon Squeezy skipped (env vars not set or failed)')
-    }
-
-    steps.push('🚀 Blueprint deployed successfully!')
-
-    const productUrl = product.short_url || `https://otutubelle.gumroad.com/l/${BLUEGUM_PRODUCT_ID}`
 
     return NextResponse.json({
       success: true,
-      productUrl,
-      lemonUrl,
       zipUrl,
-      productId: BLUEGUM_PRODUCT_ID,
-      offerCode: offerCode.name,
+      filename,
       title,
-      steps,
+      mode,
+      price,
+      uploadedAt: new Date().toISOString(),
     })
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    steps.push(`❌ Error: ${message}`)
-    return NextResponse.json({ error: message, steps }, { status: 500 })
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }
 }
