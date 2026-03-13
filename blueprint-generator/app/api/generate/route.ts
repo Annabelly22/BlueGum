@@ -2,178 +2,165 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 
 export const runtime = 'nodejs'
-
 const client = new Anthropic()
 
-// POST — generate blueprint content (frontend sends `idea`)
+type Mode = 'automation' | 'book' | 'template'
+
+function buildPrompt(mode: Mode, idea: string): string {
+  const base = `You are an expert digital product creator for Gumroad.
+The user wants to create a "${mode}" product about: "${idea}"
+
+Analyze the market demand, typical pricing, and content depth needed.
+Return ONLY valid JSON — no markdown, no code fences, no extra text.`
+
+  if (mode === 'automation') return `${base}
+{
+  "title": "Make.com blueprint product title (under 60 chars)",
+  "tagline": "One punchy value proposition sentence",
+  "description": "2-3 sentence Gumroad short description",
+  "longDescription": "Full Gumroad description 250-300 words — pain points, ROI, what's included",
+  "targetAudience": "Exact persona this is for in 1-2 sentences",
+  "stepByStepGuide": "Complete numbered Make.com build guide — trigger setup, each module with exact settings, filters, error handling, testing. Minimum 10 detailed steps.",
+  "faq": ["Q: ...? A: ...", "Q: ...? A: ...", "Q: ...? A: ...", "Q: ...? A: ...", "Q: ...? A: ..."],
+  "emailSequence": [
+    { "subject": "...", "body": "Welcome — what they got, quick start" },
+    { "subject": "...", "body": "Day 3 — troubleshooting, common questions" },
+    { "subject": "...", "body": "Upsell — related automations" }
+  ],
+  "salesCopy": "Strong headline + 5 bullet benefits + CTA",
+  "suggestedPrice": 27,
+  "priceRationale": "2-3 sentence price reasoning based on complexity, time saved, market positioning",
+  "marketDemand": "HIGH | MEDIUM | LOW",
+  "competitorRange": "$X - $Y",
+  "publishingChecklist": [
+    "Go to gumroad.com → Products → New Product → Digital",
+    "Paste the title and short description",
+    "Copy the long description into the product page editor",
+    "Set price to $X (or your preferred amount)",
+    "Upload the ZIP file downloaded from BlueGum",
+    "Add tags: make.com, automation, no-code, [niche]",
+    "Set thumbnail (use Canva — 1280x720px recommended)",
+    "Toggle Published → ON",
+    "Copy product URL and share"
+  ]
+}`
+
+  if (mode === 'book') return `${base}
+{
+  "title": "Ebook/guide title (under 60 chars)",
+  "tagline": "Transformation subtitle",
+  "description": "2-3 sentence book pitch",
+  "longDescription": "Full Gumroad description 250-300 words — reader transformation, chapters overview, who it's for",
+  "targetAudience": "Specific reader persona in 1-2 sentences",
+  "tableOfContents": ["Introduction: ...", "Chapter 1: ...", "Chapter 2: ...", "Chapter 3: ...", "Chapter 4: ...", "Chapter 5: ...", "Chapter 6: ...", "Conclusion: ..."],
+  "fullContent": "Write the COMPLETE ebook content — introduction + all chapters fully written. Minimum 2000 words. Use markdown headings, bullet points, and practical examples throughout.",
+  "keyTakeaways": ["Takeaway 1", "Takeaway 2", "Takeaway 3", "Takeaway 4", "Takeaway 5"],
+  "faq": ["Q: ...? A: ...", "Q: ...? A: ...", "Q: ...? A: ..."],
+  "emailSequence": [
+    { "subject": "...", "body": "Delivery email — reading tips, best chapter to start" },
+    { "subject": "...", "body": "Day 3 — highlight most valuable section" },
+    { "subject": "...", "body": "Review request + upsell" }
+  ],
+  "salesCopy": "Headline + 5 transformation bullets + urgency CTA",
+  "suggestedPrice": 17,
+  "priceRationale": "Price reasoning based on page count, topic demand, market comparison",
+  "marketDemand": "HIGH | MEDIUM | LOW",
+  "competitorRange": "$X - $Y",
+  "publishingChecklist": [
+    "Go to gumroad.com → Products → New Product → Digital",
+    "Paste title and short description",
+    "Copy long description into editor",
+    "Set price to $X",
+    "Upload the PDF/ZIP downloaded from BlueGum",
+    "Add tags: ebook, guide, [niche topic]",
+    "Set cover image (book mockup — Canva template recommended)",
+    "Toggle Published → ON",
+    "Share product URL"
+  ]
+}`
+
+  // template
+  return `${base}
+{
+  "title": "Template product title (under 60 chars)",
+  "tagline": "What this template lets you do immediately",
+  "description": "2-3 sentence template pitch",
+  "longDescription": "Full Gumroad description 250-300 words — what's included, time saved, integrations, who benefits",
+  "targetAudience": "Who uses this and why in 1-2 sentences",
+  "templateType": "Notion | Google Sheets | Airtable | Excel | Canva",
+  "featuresIncluded": ["Feature 1", "Feature 2", "Feature 3", "Feature 4", "Feature 5", "Feature 6"],
+  "setupGuide": "Complete numbered setup guide — how to copy/duplicate, customize fields, populate data, connect integrations. Minimum 8 detailed steps.",
+  "customizationGuide": "How to adapt the template for different use cases — 150-200 words",
+  "faq": ["Q: ...? A: ...", "Q: ...? A: ...", "Q: ...? A: ...", "Q: ...? A: ..."],
+  "emailSequence": [
+    { "subject": "...", "body": "Setup instructions + first action to take" },
+    { "subject": "...", "body": "Pro tips and advanced features" },
+    { "subject": "...", "body": "Check-in + upsell to related template pack" }
+  ],
+  "salesCopy": "Headline + 5 benefit bullets + social proof placeholder + CTA",
+  "suggestedPrice": 19,
+  "priceRationale": "Price reasoning based on complexity, time saved, market comp",
+  "marketDemand": "HIGH | MEDIUM | LOW",
+  "competitorRange": "$X - $Y",
+  "publishingChecklist": [
+    "Go to gumroad.com → Products → New Product → Digital",
+    "Paste title and short description",
+    "Copy long description into editor",
+    "Set price to $X",
+    "Upload ZIP downloaded from BlueGum",
+    "Add tags: template, notion, productivity, [niche]",
+    "Set thumbnail (screenshot of template — 1280x720px)",
+    "Toggle Published → ON",
+    "Share product URL"
+  ]
+}`
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const { idea, useSerp } = await req.json()
+    const { idea, mode = 'automation' } = await req.json()
+    if (!idea) return NextResponse.json({ error: 'idea is required' }, { status: 400 })
 
-    if (!idea) {
-      return NextResponse.json({ error: 'idea is required' }, { status: 400 })
-    }
-
-    // Optional: SerpAPI market research
-    let searchContext = ''
-    if (useSerp && process.env.SERPAPI_KEY) {
-      try {
-        const serpRes = await fetch(
-          `https://serpapi.com/search.json?q=${encodeURIComponent(idea + ' automation')}&api_key=${process.env.SERPAPI_KEY}&num=5`
-        )
-        const serpData = await serpRes.json()
-        const results = serpData.organic_results?.slice(0, 5) ?? []
-        searchContext = results.map((r: { title: string; snippet: string }) =>
-          `- ${r.title}: ${r.snippet}`
-        ).join('\n')
-      } catch {
-        // SerpAPI optional — ignore failures
-      }
-    }
-
-    const prompt = `You are an expert in no-code automation and digital product creation.
-A user wants to create a Make.com automation blueprint product for: "${idea}".
-${searchContext ? `\nMarket research context:\n${searchContext}\n` : ''}
-Return ONLY a valid JSON object — no markdown, no code fences, no explanation text.
-The JSON must exactly match this structure:
-{
-  "title": "Catchy product title under 60 chars",
-  "description": "2-3 sentence compelling short description",
-  "longDescription": "Detailed Gumroad product description, 200-300 words",
-  "stepByStepGuide": "Numbered step-by-step guide to build this Make.com workflow, including which modules to use, trigger setup, filters, error handling, and testing tips. At least 8 steps.",
-  "faq": [
-    "Q: Question one? A: Answer one.",
-    "Q: Question two? A: Answer two.",
-    "Q: Question three? A: Answer three.",
-    "Q: Question four? A: Answer four.",
-    "Q: Question five? A: Answer five."
-  ],
-  "emailSequence": [
-    { "subject": "Welcome email subject", "body": "Welcome email body" },
-    { "subject": "Follow-up email subject", "body": "Follow-up email body" },
-    { "subject": "Upsell email subject", "body": "Upsell email body" }
-  ],
-  "salesCopy": "Sales headline + 5 bullet points"
-}
-CRITICAL: Output ONLY the JSON object. Do not wrap in markdown. Do not add any text before or after.`
+    const prompt = buildPrompt(mode as Mode, idea)
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4096,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     })
 
-    if (message.content[0].type !== 'text') {
-      throw new Error('Unexpected response type from Claude API')
-    }
+    if (message.content[0].type !== 'text') throw new Error('Unexpected response type')
 
     const raw = message.content[0].text.trim()
     const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim()
 
     try {
       const parsed = JSON.parse(cleaned)
-      return NextResponse.json(parsed)
-    } catch (parseErr) {
-      throw new Error(`Failed to parse Claude response as JSON: ${(parseErr as Error).message}`)
+      return NextResponse.json({ ...parsed, mode })
+    } catch (e) {
+      throw new Error(`JSON parse failed: ${(e as Error).message}\n\nRaw: ${raw.slice(0, 300)}`)
     }
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: message }, { status: 500 })
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
   }
 }
 
-// GET — full diagnostic
 export async function GET() {
   const results: Record<string, unknown> = {}
-
-  // Anthropic
   try {
-    const client = new Anthropic()
-    await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 10,
-      messages: [{ role: 'user', content: 'hi' }],
-    })
+    await client.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] })
     results.anthropic = 'OK'
-  } catch (e) {
-    results.anthropic = `FAIL: ${e instanceof Error ? e.message : String(e)}`
-  }
+  } catch (e) { results.anthropic = `FAIL: ${(e as Error).message}` }
 
-  // Gumroad GET user
-  try {
-    const token = process.env.GUMROAD_ACCESS_TOKEN
-    const res = await fetch(`https://api.gumroad.com/v2/user?access_token=${token}`)
-    const json = await res.json()
-    results.gumroad_user = json.success ? `OK — ${json.user.email}` : `FAIL: ${json.message}`
-  } catch (e) {
-    results.gumroad_user = `FAIL: ${e instanceof Error ? e.message : String(e)}`
-  }
-
-  // Gumroad GET product wxeyzln
-  try {
-    const token = process.env.GUMROAD_ACCESS_TOKEN
-    const res = await fetch(`https://api.gumroad.com/v2/products/wxeyzln?access_token=${token}`)
-    const text = await res.text()
-    if (text.trim().startsWith('<')) {
-      results.gumroad_product_get = { FAIL: true, httpStatus: res.status, message: 'Got HTML — product ID may be wrong' }
-    } else {
-      const json = JSON.parse(text)
-      results.gumroad_product_get = json.success ? `OK — "${json.product.name}"` : `FAIL: ${json.message}`
-    }
-  } catch (e) {
-    results.gumroad_product_get = `FAIL: ${e instanceof Error ? e.message : String(e)}`
-  }
-
-  // Gumroad PUT test
-  try {
-    const token = process.env.GUMROAD_ACCESS_TOKEN
-    const body = new URLSearchParams()
-    body.append('name', 'BlueGum Blueprint [API Test]')
-    const res = await fetch(`https://api.gumroad.com/v2/products/wxeyzln?access_token=${token}`, {
-      method: 'PUT', body,
-    })
-    const text = await res.text()
-    if (text.trim().startsWith('<')) {
-      results.gumroad_put_test = { FAIL: true, httpStatus: res.status, message: 'Got HTML — PUT also blocked' }
-    } else {
-      const json = JSON.parse(text)
-      results.gumroad_put_test = json.success ? `OK — updated to "${json.product.name}"` : `FAIL: ${json.message}`
-    }
-  } catch (e) {
-    results.gumroad_put_test = `FAIL: ${e instanceof Error ? e.message : String(e)}`
-  }
-
-  // Lemon Squeezy
-  try {
-    const key = process.env.LEMONSQUEEZY_API_KEY
-    if (!key) {
-      results.lemonsqueezy = 'SKIP — LEMONSQUEEZY_API_KEY not set'
-    } else {
-      const res = await fetch('https://api.lemonsqueezy.com/v1/stores', {
-        headers: { Authorization: `Bearer ${key}`, Accept: 'application/vnd.api+json' },
-      })
-      const json = await res.json()
-      results.lemonsqueezy = json.data ? `OK — ${json.data.length} store(s)` : `FAIL: ${JSON.stringify(json.errors)}`
-    }
-  } catch (e) {
-    results.lemonsqueezy = `FAIL: ${e instanceof Error ? e.message : String(e)}`
-  }
-
-  // Supabase
   try {
     const { createClient } = await import('@supabase/supabase-js')
-    const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
-    const { data } = await supabase.storage.getBucket('blueprints')
+    const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!)
+    const { data } = await sb.storage.getBucket('blueprints')
     results.supabase = data ? `OK — blueprints public=${data.public}` : 'FAIL: bucket not found'
-  } catch (e) {
-    results.supabase = `FAIL: ${e instanceof Error ? e.message : String(e)}`
-  }
+  } catch (e) { results.supabase = `FAIL: ${(e as Error).message}` }
 
-  results.env_check = {
+  results.env = {
     ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
-    GUMROAD_TOKEN_PREVIEW: process.env.GUMROAD_ACCESS_TOKEN?.slice(0, 12) + '...',
-    LEMONSQUEEZY_API_KEY: !!process.env.LEMONSQUEEZY_API_KEY,
-    LEMONSQUEEZY_STORE_ID: process.env.LEMONSQUEEZY_STORE_ID || 'NOT SET',
     SUPABASE_URL: !!process.env.SUPABASE_URL,
     SUPABASE_SERVICE_KEY: !!process.env.SUPABASE_SERVICE_KEY,
   }
