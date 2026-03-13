@@ -1,135 +1,113 @@
-import axios from 'axios'
-
 const GUMROAD_API = 'https://api.gumroad.com/v2'
 
-function getToken() {
+// The single BlueGum template product - created manually on Gumroad
+export const BLUEGUM_PRODUCT_ID = 'wxeyzln'
+
+function getToken(): string {
   const token = process.env.GUMROAD_ACCESS_TOKEN
-  if (!token) throw new Error('GUMROAD_ACCESS_TOKEN is not set in Vercel environment variables.')
+  if (!token) throw new Error('GUMROAD_ACCESS_TOKEN is not set')
   return token
 }
 
-// Token always goes in the URL as a query param — works for GET, POST, PUT, DELETE
-function url(path: string) {
+function url(path: string): string {
   return `${GUMROAD_API}${path}?access_token=${getToken()}`
 }
 
-// Product data goes as form body
-function toForm(obj: Record<string, any>): URLSearchParams {
-  const params = new URLSearchParams()
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined && v !== null) params.append(k, String(v))
+function toForm(data: Record<string, string | number | boolean>): URLSearchParams {
+  const form = new URLSearchParams()
+  for (const [k, v] of Object.entries(data)) {
+    form.append(k, String(v))
   }
-  return params
+  return form
 }
 
-/* ─── CREATE PRODUCT ─── */
-export interface CreateProductParams {
-  name: string
-  description: string
-  price: number
-  custom_permalink?: string
-}
-
-export async function createProduct(params: CreateProductParams) {
-  const res = await axios.post(
-    url('/products'),
-    toForm({
-      name: params.name,
-      description: params.description,
-      price: params.price,
-      ...(params.custom_permalink ? { custom_permalink: params.custom_permalink } : {}),
-    })
-  )
-  if (!res.data.success) {
-    throw new Error(`Gumroad create failed: ${JSON.stringify(res.data)}`)
+// Update an existing product (PUT) — replaces POST create since Gumroad blocks that endpoint
+export async function updateProduct(
+  productId: string,
+  data: {
+    name: string
+    description: string
+    price: number
+    published?: boolean
+    url?: string
   }
-  return res.data.product
-}
+): Promise<{ id: string; name: string; short_url: string; preview_url: string }> {
+  const res = await fetch(url(`/products/${productId}`), {
+    method: 'PUT',
+    body: toForm({
+      name: data.name,
+      description: data.description,
+      price: data.price,
+      ...(data.published !== undefined ? { published: data.published } : {}),
+      ...(data.url ? { url: data.url } : {}),
+    }),
+  })
 
-/* ─── ENABLE PRODUCT ─── */
-export async function enableProduct(productId: string) {
-  await axios.put(url(`/products/${productId}/enable`), toForm({}))
-}
-
-/* ─── DISABLE PRODUCT ─── */
-export async function disableProduct(productId: string) {
-  await axios.put(url(`/products/${productId}/disable`), toForm({}))
-}
-
-/* ─── UPDATE PRODUCT ─── */
-export async function updateProduct(productId: string, params: Record<string, any>) {
-  const res = await axios.put(url(`/products/${productId}`), toForm(params))
-  if (!res.data.success) {
-    throw new Error(`Gumroad update failed: ${JSON.stringify(res.data)}`)
+  const text = await res.text()
+  if (text.trim().startsWith('<')) {
+    throw new Error(`Gumroad returned HTML (status ${res.status}) — endpoint may be invalid`)
   }
-  return res.data.product
+
+  const json = JSON.parse(text)
+  if (!json.success) throw new Error(json.message || 'Gumroad updateProduct failed')
+  return json.product
 }
 
-/* ─── DELETE PRODUCT ─── */
-export async function deleteProduct(productId: string) {
-  const res = await axios.delete(url(`/products/${productId}`))
-  return res.data
-}
-
-/* ─── LIST PRODUCTS ─── */
-export async function listProducts() {
-  const res = await axios.get(url('/products'))
-  return res.data.products ?? []
-}
-
-/* ─── GET SALES ─── */
-export async function getSales(params?: { after?: string; before?: string; page?: number }) {
-  const res = await axios.get(url('/sales'), { params })
-  return res.data.sales ?? []
-}
-
-/* ─── CREATE OFFER CODE ─── */
-export interface CreateOfferParams {
-  name: string
-  amount_off: number
-  offer_type?: 'cents' | 'percent'
-  max_purchase_count?: number
-}
-
-export async function createOfferCode(productId: string, params: CreateOfferParams) {
-  const res = await axios.post(
-    url(`/products/${productId}/offer_codes`),
-    toForm({
-      name: params.name,
-      amount_off: params.amount_off,
-      offer_type: params.offer_type ?? 'percent',
-      ...(params.max_purchase_count ? { max_purchase_count: params.max_purchase_count } : {}),
-    })
-  )
-  if (!res.data.success) {
-    throw new Error(`Gumroad offer code failed: ${JSON.stringify(res.data)}`)
+// Enable/publish a product
+export async function enableProduct(productId: string): Promise<void> {
+  const res = await fetch(url(`/products/${productId}/enable`), {
+    method: 'PUT',
+    body: toForm({}),
+  })
+  const text = await res.text()
+  if (text.trim().startsWith('<')) {
+    throw new Error(`Gumroad returned HTML on enable (status ${res.status})`)
   }
-  return res.data.offer_code
+  const json = JSON.parse(text)
+  if (!json.success) throw new Error(json.message || 'Gumroad enableProduct failed')
 }
 
-/* ─── LIST OFFER CODES ─── */
-export async function listOfferCodes(productId: string) {
-  const res = await axios.get(url(`/products/${productId}/offer_codes`))
-  return res.data.offer_codes ?? []
+// List all offer codes for a product
+export async function listOfferCodes(productId: string): Promise<Array<{ id: string; name: string }>> {
+  const res = await fetch(url(`/products/${productId}/offer_codes`), { method: 'GET' })
+  const json = await res.json()
+  return json.offer_codes || []
 }
 
-/* ─── DELETE OFFER CODE ─── */
-export async function deleteOfferCode(productId: string, offerCodeId: string) {
-  const res = await axios.delete(url(`/products/${productId}/offer_codes/${offerCodeId}`))
-  return res.data
+// Delete an existing offer code
+export async function deleteOfferCode(productId: string, offerId: string): Promise<void> {
+  await fetch(url(`/products/${productId}/offer_codes/${offerId}`), { method: 'DELETE' })
 }
 
-/* ─── GET SUBSCRIBERS ─── */
-export async function getSubscribers(productId: string) {
-  const res = await axios.get(url(`/products/${productId}/subscribers`))
-  return res.data.subscribers ?? []
+// Create a new offer code
+export async function createOfferCode(
+  productId: string,
+  opts: { name: string; amount_off: number; max_purchase_count?: number; percent_off?: boolean }
+): Promise<{ id: string; name: string; amount_off: number }> {
+  const body: Record<string, string | number | boolean> = {
+    name: opts.name,
+    amount_off: opts.amount_off,
+  }
+  if (opts.max_purchase_count !== undefined) body.max_purchase_count = opts.max_purchase_count
+  if (opts.percent_off !== undefined) body.percent_off = opts.percent_off
+
+  const res = await fetch(url(`/products/${productId}/offer_codes`), {
+    method: 'POST',
+    body: toForm(body),
+  })
+  const text = await res.text()
+  if (text.trim().startsWith('<')) {
+    throw new Error(`Gumroad returned HTML on offer code create (status ${res.status})`)
+  }
+  const json = JSON.parse(text)
+  if (!json.success) throw new Error(json.message || 'Gumroad createOfferCode failed')
+  return json.offer_code
 }
 
-/* ─── VERIFY LICENSE ─── */
-export async function verifyLicense(productId: string, licenseKey: string) {
-  const res = await axios.post(
-    url('/licenses/verify'),
-    toForm({ product_id: productId, license_key: licenseKey })
-  )
-  return res.data
+// Get user info (health check)
+export async function getUser(): Promise<{ email: string; name: string }> {
+  const res = await fetch(url('/user'), { method: 'GET' })
+  const json = await res.json()
+  if (!json.success) throw new Error(json.message || 'Gumroad getUser failed')
+  return json.user
 }
