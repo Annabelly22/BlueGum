@@ -8,19 +8,18 @@ function getToken() {
   return token
 }
 
-// Gumroad POST/PUT endpoints want access_token in the body
-// GET endpoints use it as a query param
+// Token always goes in the URL as a query param — works for GET, POST, PUT, DELETE
+function url(path: string) {
+  return `${GUMROAD_API}${path}?access_token=${getToken()}`
+}
+
+// Product data goes as form body
 function toForm(obj: Record<string, any>): URLSearchParams {
   const params = new URLSearchParams()
-  params.append('access_token', getToken())
   for (const [k, v] of Object.entries(obj)) {
     if (v !== undefined && v !== null) params.append(k, String(v))
   }
   return params
-}
-
-function getParams() {
-  return { access_token: getToken() }
 }
 
 /* ─── CREATE PRODUCT ─── */
@@ -33,7 +32,7 @@ export interface CreateProductParams {
 
 export async function createProduct(params: CreateProductParams) {
   const res = await axios.post(
-    `${GUMROAD_API}/products`,
+    url('/products'),
     toForm({
       name: params.name,
       description: params.description,
@@ -49,17 +48,17 @@ export async function createProduct(params: CreateProductParams) {
 
 /* ─── ENABLE PRODUCT ─── */
 export async function enableProduct(productId: string) {
-  await axios.put(`${GUMROAD_API}/products/${productId}/enable`, toForm({}))
+  await axios.put(url(`/products/${productId}/enable`), toForm({}))
 }
 
 /* ─── DISABLE PRODUCT ─── */
 export async function disableProduct(productId: string) {
-  await axios.put(`${GUMROAD_API}/products/${productId}/disable`, toForm({}))
+  await axios.put(url(`/products/${productId}/disable`), toForm({}))
 }
 
 /* ─── UPDATE PRODUCT ─── */
 export async function updateProduct(productId: string, params: Record<string, any>) {
-  const res = await axios.put(`${GUMROAD_API}/products/${productId}`, toForm(params))
+  const res = await axios.put(url(`/products/${productId}`), toForm(params))
   if (!res.data.success) {
     throw new Error(`Gumroad update failed: ${JSON.stringify(res.data)}`)
   }
@@ -68,19 +67,19 @@ export async function updateProduct(productId: string, params: Record<string, an
 
 /* ─── DELETE PRODUCT ─── */
 export async function deleteProduct(productId: string) {
-  const res = await axios.delete(`${GUMROAD_API}/products/${productId}`, { params: getParams() })
+  const res = await axios.delete(url(`/products/${productId}`))
   return res.data
 }
 
 /* ─── LIST PRODUCTS ─── */
 export async function listProducts() {
-  const res = await axios.get(`${GUMROAD_API}/products`, { params: getParams() })
+  const res = await axios.get(url('/products'))
   return res.data.products ?? []
 }
 
 /* ─── GET SALES ─── */
 export async function getSales(params?: { after?: string; before?: string; page?: number }) {
-  const res = await axios.get(`${GUMROAD_API}/sales`, { params: { ...getParams(), ...params } })
+  const res = await axios.get(url('/sales'), { params })
   return res.data.sales ?? []
 }
 
@@ -94,7 +93,7 @@ export interface CreateOfferParams {
 
 export async function createOfferCode(productId: string, params: CreateOfferParams) {
   const res = await axios.post(
-    `${GUMROAD_API}/products/${productId}/offer_codes`,
+    url(`/products/${productId}/offer_codes`),
     toForm({
       name: params.name,
       amount_off: params.amount_off,
@@ -110,35 +109,26 @@ export async function createOfferCode(productId: string, params: CreateOfferPara
 
 /* ─── LIST OFFER CODES ─── */
 export async function listOfferCodes(productId: string) {
-  const res = await axios.get(
-    `${GUMROAD_API}/products/${productId}/offer_codes`,
-    { params: getParams() }
-  )
+  const res = await axios.get(url(`/products/${productId}/offer_codes`))
   return res.data.offer_codes ?? []
 }
 
 /* ─── DELETE OFFER CODE ─── */
 export async function deleteOfferCode(productId: string, offerCodeId: string) {
-  const res = await axios.delete(
-    `${GUMROAD_API}/products/${productId}/offer_codes/${offerCodeId}`,
-    { params: getParams() }
-  )
+  const res = await axios.delete(url(`/products/${productId}/offer_codes/${offerCodeId}`))
   return res.data
 }
 
 /* ─── GET SUBSCRIBERS ─── */
 export async function getSubscribers(productId: string) {
-  const res = await axios.get(
-    `${GUMROAD_API}/products/${productId}/subscribers`,
-    { params: getParams() }
-  )
+  const res = await axios.get(url(`/products/${productId}/subscribers`))
   return res.data.subscribers ?? []
 }
 
 /* ─── VERIFY LICENSE ─── */
 export async function verifyLicense(productId: string, licenseKey: string) {
   const res = await axios.post(
-    `${GUMROAD_API}/licenses/verify`,
+    url('/licenses/verify'),
     toForm({ product_id: productId, license_key: licenseKey })
   )
   return res.data
